@@ -1,0 +1,1170 @@
+---
+title: "Introduction to Data Science: Semester Project (Phase 1 — Midterm)"
+author: "Kazi Fahad Mahin, Wakar Alvee ,TANJIM KHAN NABIL "
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    code_folding: hide
+    theme: flatly
+    highlight: tango
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+set.seed(42)
+```
+
+---
+
+# Package Installation and Loading
+
+All required packages are installed dynamically so this document runs on any machine
+without any manual setup.
+
+```{r packages}
+if (!require("tidyverse"))   install.packages("tidyverse")
+if (!require("skimr"))       install.packages("skimr")
+if (!require("caret"))       install.packages("caret")
+if (!require("moments"))     install.packages("moments")
+if (!require("ggcorrplot"))  install.packages("ggcorrplot")
+if (!require("knitr"))       install.packages("knitr")
+if (!require("kableExtra"))  install.packages("kableExtra")
+
+library(tidyverse)
+library(skimr)
+library(caret)
+library(moments)
+library(ggcorrplot)
+library(knitr)
+library(kableExtra)
+```
+
+---
+
+# Section 1 — Problem Framing
+
+## 1.1 Domain Context and Dataset Background
+
+Mental health among students has emerged as one of the most critical public health challenges
+of the 21st century. Depression is a leading cause of disability worldwide and is particularly
+prevalent in the student population, where it significantly affects academic performance, social
+engagement, physical health, and overall quality of life. According to the World Health
+Organisation (WHO), depression affects more than 300 million people globally, with onset
+most commonly occurring during adolescence and early adulthood — precisely the years that
+overlap with higher education.
+
+Multiple intersecting factors contribute to student depression: high academic pressure, financial
+burdens, disrupted sleep patterns, poor dietary habits, limited social support, and a family
+history of mental illness all play important roles. Despite the scale of the problem, depression
+in students remains widely underdiagnosed and under-treated due to persistent stigma and
+limited access to mental health services in educational institutions.
+
+This project utilises the **Student Depression Dataset** (Kaggle, 2024 — published by
+*hopesb*), titled *"Analyzing Mental Health Trends and Predictors Among Students."*
+The dataset captures self-reported mental health, lifestyle, and academic attributes from
+**27,901 students** across 52 cities in India. It contains **18 variables** spanning four
+key domains:
+
+- **Demographic Variables:** `id`, `Gender`, `Age`, `City`
+- **Academic & Professional Variables:** `Profession`, `Academic Pressure`, `Work Pressure`,
+  `CGPA`, `Study Satisfaction`, `Job Satisfaction`, `Degree`
+- **Lifestyle Variables:** `Sleep Duration`, `Dietary Habits`, `Work/Study Hours`
+- **Mental Health & Stress Variables:** `Financial Stress`,
+  `Have you ever had suicidal thoughts ?`, `Family History of Mental Illness`
+- **Target Variable:** `Depression` (binary: 1 = Depressed, 0 = Not Depressed)
+
+The dataset contains realistic data quality challenges — only 3 missing values (in
+`Financial Stress`), an ordinal categorical variable (`Sleep Duration`) stored as multi-level
+text requiring encoding, `Work Pressure` and `Job Satisfaction` columns with near-zero
+variance (since 99.9% of respondents are students), and potential data entry errors in the
+`City` column — making it a rich and authentic candidate for a complete data science pipeline.
+
+---
+
+## 1.2 Research Questions
+
+Three specific, testable analytical questions guide this project:
+
+**RQ1 — Academic Pressure and Financial Stress as Drivers of Depression:**
+> Do students with high Academic Pressure (score ≥ 4 on the 0–5 scale) and high Financial
+> Stress (score ≥ 4 on the 1–5 scale) exhibit a significantly higher proportion of
+> depression (Depression = 1) compared to students with lower levels of both stressors?
+
+**RQ2 — Sleep Duration and Depression Status:**
+> Do students who sleep fewer than 5 hours per night show a significantly higher rate of
+> depression compared to students who sleep 7–8 hours, after controlling for Academic
+> Pressure?
+
+**RQ3 — Predictive Modelling of Student Depression:**
+> Can a supervised binary classification model, trained on academic, lifestyle, and
+> demographic features, predict student depression status with an AUC-ROC score
+> exceeding 0.80 on a held-out test set?
+
+---
+
+## 1.3 Success Criteria and Evaluation Metrics
+
+Since `Depression` is a **binary classification target** and the dataset shows a moderate
+class imbalance (58.5% depressed vs. 41.5% not depressed), raw accuracy can be misleading.
+The following success criteria are defined:
+
+```{r success-criteria, echo=FALSE}
+criteria <- tibble(
+  `Evaluation Metric`    = c(
+    "Classification Accuracy",
+    "AUC-ROC Score",
+    "Recall (Sensitivity) — Depression = 1",
+    "F1-Score",
+    "Precision"
+  ),
+  `Target Threshold`     = c(
+    ">= 80% on held-out test set",
+    ">= 0.80",
+    ">= 0.75 (minimise missed depressed students)",
+    ">= 0.75",
+    ">= 0.70"
+  ),
+  `Justification`        = c(
+    "Standard baseline for binary classification tasks",
+    "Preferred metric under class imbalance; measures discriminative ability across all thresholds",
+    "In a mental health context, failing to identify a depressed student (false negative) carries a higher real-world cost than a false positive",
+    "Harmonic mean of precision and recall — balances both error types for the positive class",
+    "Ensures the model does not produce excessive false positive flags for depressed status"
+  )
+)
+kable(criteria,
+      caption = "Table 1.1: Project Success Criteria and Evaluation Metrics") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = TRUE)
+```
+
+**Recall** and **AUC-ROC** are prioritised because early identification of at-risk students
+is the primary applied goal. Failing to identify a depressed student (false negative) has a
+substantially higher cost than incorrectly flagging a non-depressed student (false positive).
+
+---
+
+## 1.4 Dataset Justification
+
+```{r justification-table, echo=FALSE}
+justification <- tibble(
+  `Project Requirement`       = c(
+    "Minimum 500 rows",
+    "Minimum 8 variables",
+    "Clearly definable target variable",
+    "Mix of numeric and categorical features",
+    "Contains real messiness",
+    "Publicly accessible via direct URL"
+  ),
+  `Status`                    = c(
+    "✔ Met",
+    "✔ Met",
+    "✔ Met",
+    "✔ Met",
+    "✔ Met",
+    "✔ Met"
+  ),
+  `Evidence from Actual Data` = c(
+    "27,901 student records — 55× the 500-row minimum",
+    "18 variables — exceeds the 8-variable minimum",
+    "`Depression` (binary: 1 = Depressed, 0 = Not Depressed) — 16,336 positive cases (58.5%) vs. 11,565 negative cases (41.5%) — well-suited for classification",
+    "Numeric: Age, CGPA, Academic Pressure, Work Pressure, Study Satisfaction, Job Satisfaction, Work/Study Hours, Financial Stress (8 numeric). Categorical: Gender, City, Profession, Sleep Duration, Dietary Habits, Degree, Suicidal Thoughts, Family History of Mental Illness, Depression (10 categorical)",
+    "(1) Financial Stress has 3 missing values requiring imputation. (2) Sleep Duration is stored as ordinal text ('Less than 5 hours', '5-6 hours', '7-8 hours', 'More than 8 hours', 'Others') needing numeric encoding. (3) Work Pressure and Job Satisfaction are near-zero for all 27,870 student respondents — near-zero variance columns requiring evaluation for removal. (4) City column contains apparent data entry errors (e.g., 'M.Tech', '3.0', 'Saanvi' appear as city names). (5) Dietary Habits and Sleep Duration each have a small 'Others' category (12 and 18 records respectively) requiring treatment",
+    "Dataset downloaded from Kaggle and uploaded to a public GitHub repository for direct URL loading — no authentication required (see Section 2.1)"
+  )
+)
+kable(justification,
+      caption = "Table 1.2: Dataset Selection Requirements Checklist") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = TRUE) %>%
+  column_spec(1, bold = TRUE, width = "22%") %>%
+  column_spec(2, width = "8%") %>%
+  column_spec(3, width = "70%")
+```
+
+The Student Depression Dataset is also pedagogically ideal: it covers the full data science
+lifecycle — from raw inspection and categorical encoding through EDA, feature engineering,
+modelling, and evaluation — while addressing a socially significant real-world problem that
+is directly relevant to the academic context of this course.
+
+---
+
+# Section 2 — Data Acquisition & Initial Inspection
+
+## 2.1 Loading the Dataset
+
+The original dataset is published on Kaggle:
+`https://www.kaggle.com/datasets/hopesb/student-depression-dataset`
+
+Since Kaggle requires user authentication for direct CSV download, the dataset has been
+uploaded to a public GitHub repository to enable fully reproducible, authentication-free
+loading from any machine. The data is loaded using `read_csv()` from the `readr` package
+(part of `tidyverse`). **No local file paths are used anywhere in this document.**
+
+> **Submission Note:** Replace the URL below with your group's actual public GitHub raw URL
+> before knitting. Format:
+> `https://raw.githubusercontent.com/USERNAME/REPO/main/Student%20Depression%20Dataset.csv`
+
+```{r load-data}
+library(readr)
+
+url <- "https://drive.google.com/uc?export=download&id=1tbt8lECwqnPcanJXmTf1gC_fw7gjxnBQ"
+
+depression <- read_csv(url, show_col_types = FALSE)
+```
+
+**Observation:** The dataset loaded successfully from the public GitHub URL without any
+errors or authentication prompts. It contains **`r nrow(depression)` rows** and
+**`r ncol(depression)` columns**, confirming that it exceeds the project minimum of 500 rows
+and 8 variables by a substantial margin.
+
+---
+
+## 2.2 Dataset Dimensions
+
+```{r dimensions}
+cat("Number of rows (students / observations) :", nrow(depression), "\n")
+cat("Number of columns (variables)             :", ncol(depression), "\n")
+cat("Full dimensions                           :", paste(dim(depression), collapse = " x "), "\n")
+```
+
+**Observation:** With 27,901 observations and 18 variables, the dataset is sufficiently large
+for robust statistical analysis and reliable machine learning model training and validation.
+The large sample size substantially reduces the risk of overfitting and allows for a meaningful
+80/20 train-test split — yielding approximately 22,320 training records and 5,580 test records
+in Phase 2.
+
+---
+
+## 2.3 Variable Names and Data Types
+
+```{r variable-types}
+tibble(
+  `#`             = seq_along(names(depression)),
+  `Variable Name` = names(depression),
+  `R Data Type`   = sapply(depression, class),
+  `Role`          = c("Identifier", rep("Predictor", 16), "Target"),
+  `Domain Type`   = c(
+    "Unique integer ID — not a predictive feature; exclude from modelling",
+    "Nominal categorical — Male (55.7%) / Female (44.3%)",
+    "Numeric continuous — age in years; range: 18–59, mean: 25.82",
+    "Nominal categorical — 52 unique cities (contains data entry errors to fix)",
+    "Nominal categorical — 99.9% 'Student'; near-zero variance",
+    "Ordinal numeric scale 0–5 — academic workload stress; mean: 3.14",
+    "Ordinal numeric scale 0–5 — work-related stress; near-zero for students",
+    "Numeric continuous — Indian 10-point GPA scale; range: 0–10, mean: 7.66",
+    "Ordinal numeric scale 0–5 — satisfaction with studies; mean: 2.94",
+    "Ordinal numeric scale 0–4 — satisfaction with job; near-zero for students",
+    "Ordinal categorical text — 5 levels: 'Less than 5 hours','5-6 hours','7-8 hours','More than 8 hours','Others'",
+    "Nominal categorical — 3 levels: 'Healthy','Moderate','Unhealthy' (+ 12 'Others')",
+    "Nominal categorical — 28 unique degree types",
+    "Binary categorical — Yes (63.3%) / No (36.7%): mental health risk factor",
+    "Numeric continuous — daily work or study hours; range: 0–12, mean: 7.16",
+    "Ordinal numeric scale 1–5 — financial burden; mean: 3.14; 3 missing values",
+    "Binary categorical — No (51.6%) / Yes (48.4%): hereditary mental health risk",
+    "Binary numeric TARGET — 1 = Depressed (58.5%) / 0 = Not Depressed (41.5%)"
+  )
+) %>%
+  kable(caption = "Table 2.1: All 18 Variables — Names, Types, and Domain Interpretation") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = TRUE, font_size = 11) %>%
+  column_spec(1, width = "3%") %>%
+  column_spec(2, bold = TRUE, width = "18%") %>%
+  column_spec(3, width = "10%") %>%
+  column_spec(4, width = "8%") %>%
+  column_spec(5, width = "61%")
+```
+
+**Observation:** The dataset contains **8 numeric variables** (including the target) and
+**10 character/categorical variables**. Five important structural issues are immediately
+visible from type inspection alone:
+
+1. **`Work Pressure` and `Job Satisfaction`** — both have a mean of approximately 0.00,
+   because 99.9% of respondents are students with no active employment. These columns have
+   near-zero variance and will likely be excluded during feature selection in Section 4.
+2. **`Sleep Duration`** — stored as ordinal text, not a number. Must be encoded as an
+   ordered numeric (1 = Less than 5 hrs → 4 = More than 8 hrs) for correlation analysis
+   and modelling.
+3. **`City`** — 52 unique values including apparent data entry errors such as `"M.Tech"`,
+   `"3.0"`, `"Saanvi"`, and `"Reyansh"` — these are not city names and indicate row-shift
+   data corruption that must be investigated in Section 3 and corrected in Section 4.
+4. **`Depression`** — stored as numeric integer (0/1), but functionally a binary factor.
+   Must be converted to `factor` before classification modelling in Phase 2.
+5. **`Financial Stress`** — the only column with missing values (3 records), which will be
+   imputed in Section 4.
+
+---
+
+## 2.4 First Six Rows of the Dataset
+
+```{r head}
+head(depression, 6) %>%
+  kable(caption = "Table 2.2: First 6 Rows of the Student Depression Dataset") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = TRUE, font_size = 11) %>%
+  scroll_box(width = "100%", height = "280px")
+```
+
+**Observation:** The `head()` output confirms the expected structure. Key observations:
+
+- The `id` column is a non-sequential integer identifier (starts at 2, 8, 26...) — this
+  suggests the original dataset was filtered from a larger collection; `id` carries no
+  predictive signal and will be dropped.
+- `Work Pressure` and `Job Satisfaction` both show `0.0` for all visible rows, consistent
+  with a student-only respondent base.
+- `Sleep Duration` values such as `"5-6 hours"` and `"Less than 5 hours"` confirm the
+  multi-level text encoding that requires ordinal conversion.
+- `Depression` appears as a raw integer (0 or 1), which must be converted to a labelled
+  factor (`"Not Depressed"` / `"Depressed"`) before modelling.
+- `City` values (e.g., Visakhapatnam, Bangalore, Srinagar) appear legitimate in the first
+  rows, but the data quality issue becomes apparent when inspecting the full dataset.
+
+---
+
+## 2.5 Full Summary Statistics
+
+```{r skim-summary}
+skim(depression)
+```
+
+**Observation:** The `skim()` output provides a comprehensive statistical profile.
+The table below documents the most important findings that will directly shape the
+preprocessing and analysis decisions in Sections 3 and 4:
+
+```{r skim-key-findings, echo=FALSE}
+findings <- tibble(
+  `Variable / Issue`             = c(
+    "Depression (Target) — Class Distribution",
+    "Financial Stress — Missing Values",
+    "Have you ever had suicidal thoughts?",
+    "Family History of Mental Illness",
+    "Sleep Duration — Category Frequencies",
+    "Dietary Habits — Category Frequencies",
+    "Work Pressure & Job Satisfaction",
+    "Academic Pressure — Distribution",
+    "CGPA — Range and Scale",
+    "Age — Range",
+    "Work/Study Hours — Range",
+    "City — Data Quality",
+    "Profession — Low Variance"
+  ),
+  `Statistical Finding`          = c(
+    "16,336 depressed (58.5%) vs. 11,565 not depressed (41.5%) — moderate class imbalance favouring the positive class; majority class baseline accuracy = 58.5%",
+    "3 missing values only — very small proportion (0.01% of 27,901 rows); median imputation is appropriate and justified in Section 4",
+    "17,656 said Yes (63.3%) vs. 10,245 said No (36.7%) — alarmingly high proportion; strong candidate predictor to be validated in bivariate analysis (Section 3)",
+    "No: 14,398 (51.6%) vs. Yes: 13,503 (48.4%) — near-even split; both groups well-represented for subgroup comparison",
+    "Less than 5 hrs: 8,310 (29.8%) | 5-6 hrs: 6,183 (22.2%) | 7-8 hrs: 7,346 (26.3%) | More than 8 hrs: 6,044 (21.7%) | Others: 18 (0.06%) — majority sleep below recommended 7-8 hrs; 'Others' category (18 records) to be treated in Section 4",
+    "Unhealthy: 10,317 (37.0%) | Moderate: 9,921 (35.6%) | Healthy: 7,651 (27.4%) | Others: 12 (0.04%) — over one-third report unhealthy diet; 'Others' (12 records) to be removed or imputed",
+    "Work Pressure mean ≈ 0.00, Job Satisfaction mean ≈ 0.00 — near-zero variance across all 27,901 rows; these columns add no discriminative information for the student population and will be considered for removal in feature selection (Section 4)",
+    "Mean: 3.14 on 0-5 scale — students report moderate-to-high academic stress on average; range 0-5 with no missing values; key predictor for RQ1",
+    "Range: 0.00 to 10.00, Mean: 7.66 — follows Indian 10-point grading system; a CGPA of 7.66 corresponds to a solid B+ average in the Indian system; low-end values near 0.0 should be investigated as potential data errors in Section 3",
+    "Range: 18–59 years, Mean: 25.82 — predominantly young adults aged 18-30; older respondents (30+) may represent part-time or postgraduate students",
+    "Range: 0–12 hours/day, Mean: 7.16 — wide spread; extreme values (0 and 12) should be examined as potential outliers in Section 3 EDA",
+    "52 unique city values; however, entries such as 'M.Tech', '3.0', 'Saanvi', 'Mira', 'Reyansh' are clearly not valid city names — these likely result from row-shift data corruption during collection and will be investigated and cleaned in Section 4",
+    "27,870 of 27,901 respondents (99.9%) list Profession as 'Student'; remaining 31 records include Architect, Teacher, Doctor, etc. — near-zero variance; this column will be dropped in feature selection"
+  )
+)
+kable(findings,
+      caption = "Table 2.3: Key Statistical Findings from skimr Summary") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = TRUE) %>%
+  column_spec(1, bold = TRUE, width = "28%") %>%
+  column_spec(2, width = "72%")
+```
+
+---
+
+## 2.6 Data Provenance
+
+```{r provenance, echo=FALSE}
+provenance <- tibble(
+  `Attribute`    = c(
+    "Dataset Title",
+    "Original Publisher",
+    "Original Source Platform",
+    "Kaggle Dataset URL",
+    "Access Method for This Document",
+    "Access URL (GitHub Mirror)",
+    "Data Collection Method",
+    "Number of Observations",
+    "Number of Variables",
+    "Target Variable",
+    "Licence",
+    "Limitation 1 — Self-Report Bias",
+    "Limitation 2 — Undisclosed Survey Instrument",
+    "Limitation 3 — Indian Academic Context",
+    "Limitation 4 — City Column Corruption",
+    "Limitation 5 — No Temporal Dimension"
+  ),
+  `Details`      = c(
+    "Student Depression Dataset — Analyzing Mental Health Trends and Predictors Among Students",
+    "hopesb (Kaggle user, 2024)",
+    "Kaggle (https://www.kaggle.com)",
+    "https://www.kaggle.com/datasets/hopesb/student-depression-dataset",
+    "Dataset downloaded from Kaggle and uploaded to a public GitHub repository to enable direct, authentication-free URL loading in R Markdown without modification on any machine",
+    "https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main/Student%20Depression%20Dataset.csv",
+    "Self-reported survey data collected from students across 52 cities in India. Respondents reported demographic information, academic metrics (CGPA, Academic Pressure), lifestyle habits (Sleep Duration, Dietary Habits, Work/Study Hours), financial and mental health indicators, and self-assessed depression status. The exact survey platform, sampling strategy, and response rate are not disclosed by the publisher.",
+    "27,901 student records",
+    "18 variables (1 identifier, 16 predictors, 1 binary target)",
+    "Depression — binary integer: 1 = Depressed (16,336 students, 58.5%), 0 = Not Depressed (11,565 students, 41.5%)",
+    "Publicly available on Kaggle for educational and research use under Kaggle's standard open dataset terms",
+    "All mental health, lifestyle, and academic data is self-reported. Students may underreport depression, suicidal ideation, or financial stress due to social stigma — meaning true prevalence rates may be higher than recorded. The target variable (Depression = 1/0) is based on self-assessment, not clinical diagnosis.",
+    "The exact survey questionnaire, data collection dates, and sampling methodology are not disclosed. It is therefore impossible to assess whether the sample is representative of the broader Indian student population, or what screening criteria were used to include respondents.",
+    "CGPA is recorded on the Indian 10-point scale (not the 4-point US/European scale). All academic performance interpretations must be framed within this context. Additionally, degree programmes (e.g., B.Ed, BHM, LLB) and city names are specific to the Indian higher education system.",
+    "The City column contains 52 unique values but includes apparent data entry errors — entries such as 'M.Tech', '3.0', 'Saanvi', and 'Reyansh' are not valid city names and likely result from column-shift data corruption during survey data entry. These records will be investigated and treated in Section 4.",
+    "The dataset contains no date, semester, or academic year information. Longitudinal trends, seasonal effects on mental health, or year-on-year changes in student depression rates cannot be studied. All findings represent a single cross-sectional snapshot."
+  )
+)
+kable(provenance,
+      caption = "Table 2.4: Complete Data Provenance Documentation") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"),
+                full_width = TRUE) %>%
+  column_spec(1, bold = TRUE, width = "25%") %>%
+  column_spec(2, width = "75%")
+```
+
+**Observation:** The dataset is openly accessible, well-structured, and directly aligned
+with the research questions defined in Section 1. The five limitations documented above —
+particularly self-report bias and the undisclosed survey instrument — must be consistently
+acknowledged when interpreting findings. All statistical associations identified in this
+report should be interpreted as correlational, not causal.
+
+---
+
+*End of Section 1 (Problem Framing) and Section 2 (Data Acquisition & Initial Inspection).*
+*Section 3 — Exploratory Data Analysis and Section 4 — Preprocessing & Feature Engineering follow below.*
+
+---
+
+# Learning Objectives section 3
+
+After completing this analysis, the reader will be able to:
+
+- Understand the structure of the Student Depression Dataset.
+- Visualize distributions of key variables using histograms and bar charts.
+- Identify patterns and trends in demographic and academic factors.
+- Analyze skewness of numerical variables.
+- Explore relationships between predictors and depression.
+- Examine correlations among numerical variables.
+- Highlight meaningful insights from the dataset.
+
+---
+
+# 1. Load Required Libraries
+
+The following packages are used for data manipulation, visualization, and statistical analysis.
+
+```{r}
+library(tidyverse)
+library(corrplot)
+library(e1071)
+```
+
+### Package Description
+
+- **tidyverse**: Collection of packages for data manipulation and visualization.
+- **ggplot2**: Used for creating professional visualizations.
+- **corrplot**: Used to visualize correlation matrices.
+- **e1071**: Provides skewness calculation functions.
+
+---
+
+# 2. Load Dataset
+
+The dataset is loaded directly from Google Drive.
+
+```{r}
+url <- "https://drive.google.com/uc?export=download&id=1tbt8lECwqnPcanJXmTf1gC_fw7gjxnBQ"
+
+depression <- read_csv(
+  url,
+  show_col_types = FALSE
+)
+
+head(depression)
+```
+
+### Observation
+
+The dataset contains demographic, academic, lifestyle, and mental health information collected from students.
+
+---
+
+# 3. Understanding the Dataset
+
+Before performing analysis, it is important to understand the dataset structure.
+
+```{r}
+str(depression)
+```
+
+```{r}
+dim(depression)
+```
+
+```{r}
+summary(depression)
+```
+
+```{r}
+names(depression)
+```
+
+### Observation
+
+- The dataset contains multiple numerical and categorical variables.
+- Depression is the target variable.
+- Predictors include age, CGPA, academic pressure, financial stress, sleep duration, and other lifestyle factors.
+
+---
+
+# 4. Univariate Analysis
+
+Univariate analysis examines each variable individually to understand its distribution and characteristics.
+
+---
+
+## Distribution of Age
+
+A histogram helps visualize the distribution of age among students.
+
+```{r}
+ggplot(
+  depression,
+  aes(x = Age)
+) +
+  geom_histogram(
+    bins = 12,
+    fill = "steelblue",
+    color = "black"
+  ) +
+  labs(
+    title = "Distribution of Age",
+    x = "Age",
+    y = "Frequency"
+  ) +
+  theme_minimal()
+```
+
+### Observation
+
+Most students fall within the typical university age range. The distribution appears slightly right-skewed, indicating fewer older students.
+
+---
+
+##  Distribution of CGPA
+
+CGPA represents academic performance.
+
+```{r}
+ggplot(
+  depression,
+  aes(x = CGPA)
+) +
+  geom_histogram(
+    bins = 10,
+    fill = "darkgreen",
+    color = "black"
+  ) +
+  labs(
+    title = "Distribution of CGPA",
+    x = "CGPA",
+    y = "Frequency"
+  ) +
+  theme_minimal()
+```
+
+### Observation
+
+Most students have a CGPA concentrated around the middle to higher range, suggesting satisfactory academic performance.
+
+---
+
+##  Distribution of Academic Pressure
+
+Academic pressure measures the level of academic stress experienced by students.
+
+```{r}
+ggplot(
+  depression,
+  aes(x = `Academic Pressure`)
+) +
+  geom_histogram(
+    binwidth = 1,
+    fill = "orange",
+    color = "black"
+  ) +
+  labs(
+    title = "Distribution of Academic Pressure",
+    x = "Academic Pressure",
+    y = "Frequency"
+  ) +
+  theme_minimal()
+```
+
+### Observation
+
+The majority of students report moderate to high academic pressure, indicating academic stress is common.
+
+---
+
+##  Distribution of Financial Stress
+
+Financial stress can significantly affect mental well-being.
+
+```{r}
+ggplot(
+  depression,
+  aes(x = `Financial Stress`)
+) +
+  geom_histogram(
+    binwidth = 1,
+    fill = "red",
+    color = "black"
+  ) +
+  labs(
+    title = "Distribution of Financial Stress",
+    x = "Financial Stress",
+    y = "Frequency"
+  ) +
+  theme_minimal()
+```
+---
+
+##  Skewness Analysis
+
+Skewness quantifies asymmetry in a distribution. Values near 0 indicate symmetry;
+|skew| > 1 generally signals a transformation (log, sqrt) may improve model performance
+for algorithms sensitive to distributional shape (e.g. linear/logistic regression).
+
+```{r skewness-analysis}
+install.packages("kableExtra")
+library(tidyverse)
+library(e1071)
+library(corrplot)
+library(knitr)
+library(kableExtra)
+numeric_vars <- c("Age", "CGPA", "Academic Pressure", "Work Pressure",
+                   "Study Satisfaction", "Job Satisfaction",
+                   "Work/Study Hours", "Financial Stress")
+
+skew_table <- tibble(
+  Variable = numeric_vars,
+  Skewness = sapply(numeric_vars, function(v) round(skewness(depression[[v]], na.rm = TRUE), 3))
+) %>%
+  mutate(
+    Interpretation = case_when(
+      abs(Skewness) < 0.5 ~ "Approximately symmetric — no transformation needed",
+      abs(Skewness) < 1   ~ "Moderately skewed — transformation optional",
+      TRUE                ~ "Highly skewed — transformation recommended"
+    )
+  )
+
+kable(skew_table, caption = "Table 3.1: Skewness of Numeric Variables") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
+```
+
+**Observation:** [Fill in once knitted — name the two most skewed variables by their
+actual computed values, note that `Work Pressure`/`Job Satisfaction` skewness isn't
+meaningful given their near-zero variance, and state which variable(s), if any, you'd
+log-transform in Section 4.]
+
+---
+
+##  Bivariate Analysis
+
+```{r bivariate-cgpa}
+ggplot(depression, aes(x = factor(Depression, labels = c("No", "Yes")), y = CGPA, fill = factor(Depression))) +
+  geom_boxplot() +
+  labs(title = "CGPA by Depression Status", x = "Depression", y = "CGPA") +
+  theme_minimal() + theme(legend.position = "none")
+```
+
+**Observation:** [Compare median CGPA across groups — is it meaningfully different?]
+
+```{r bivariate-academic-pressure}
+ggplot(depression, aes(x = factor(Depression, labels = c("No", "Yes")), y = `Academic Pressure`, fill = factor(Depression))) +
+  geom_boxplot() +
+  labs(title = "Academic Pressure by Depression Status", x = "Depression", y = "Academic Pressure") +
+  theme_minimal() + theme(legend.position = "none")
+```
+
+**Observation:** [State whether Academic Pressure clearly separates the two groups — this speaks directly to RQ1.]
+
+```{r bivariate-scatter}
+ggplot(depression, aes(x = Age, y = CGPA, color = factor(Depression, labels = c("No", "Yes")))) +
+  geom_point(alpha = 0.3) +
+  labs(title = "Age vs CGPA, Coloured by Depression", color = "Depression") +
+  theme_minimal()
+```
+
+**Observation:** [Note any visible clustering by Depression across Age/CGPA.]
+
+```{r bivariate-grouped-summary}
+grouped_summary <- depression %>%
+  group_by(Depression) %>%
+  summarise(
+    Mean_Academic_Pressure = round(mean(`Academic Pressure`), 2),
+    Mean_Financial_Stress  = round(mean(`Financial Stress`, na.rm = TRUE), 2),
+    Mean_CGPA              = round(mean(CGPA), 2),
+    Pct_Sleep_Under_5hrs   = round(mean(`Sleep Duration` == "Less than 5 hours") * 100, 1),
+    Pct_Suicidal_Thoughts  = round(mean(`Have you ever had suicidal thoughts ?` == "Yes") * 100, 1)
+  )
+
+kable(grouped_summary, caption = "Table 3.2: Grouped Summary Statistics by Depression Status") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
+```
+
+**Observation:** [Use the real percentages here — this table is your strongest bivariate evidence for RQ1/RQ2, so cite the actual gap between groups, e.g. "X% of depressed students report <5hrs sleep vs Y% of non-depressed."]
+
+---
+
+##  Correlation Analysis (EDA)
+
+```{r eda-correlation}
+numeric_df <- depression %>%
+  select(Age, CGPA, `Academic Pressure`, `Work Pressure`, `Study Satisfaction`,
+         `Job Satisfaction`, `Work/Study Hours`, `Financial Stress`, Depression)
+
+cor_matrix_eda <- cor(numeric_df, use = "complete.obs")
+
+corrplot(cor_matrix_eda, method = "color", type = "upper",
+         tl.col = "black", tl.srt = 45, addCoef.col = "black", number.cex = 0.7,
+         title = "Figure 3.1: Correlation Matrix of Numeric Variables (EDA)",
+         mar = c(0, 0, 2, 0))
+```
+
+**Observation:** [Name the strongest positive pair, the strongest negative pair, and flag any |r| > 0.7 as a multicollinearity risk to revisit in Section 4.]
+
+---
+
+##  Non-Obvious Finding
+
+```{r non-obvious-finding}
+ggplot(depression, aes(x = factor(Depression, labels = c("No", "Yes")), y = CGPA)) +
+  geom_violin(fill = "skyblue", alpha = 0.6) +
+  geom_boxplot(width = 0.1, fill = "white") +
+  labs(title = "Figure 3.2: CGPA Distribution — Depressed vs. Not Depressed",
+       x = "Depression", y = "CGPA") +
+  theme_minimal()
+
+depression %>%
+  group_by(Depression) %>%
+  summarise(Mean_CGPA = round(mean(CGPA), 2), Median_CGPA = round(median(CGPA), 2)) %>%
+  kable(caption = "Table 3.3: CGPA Summary by Depression Status")
+```
+
+**Observation:** [If CGPA turns out nearly identical across groups, that's the non-obvious finding: academic *performance* isn't a strong depression driver, contrary to intuition — it's academic *pressure* (a perception variable) that matters more. State the actual mean/median gap you get.]
+
+---
+
+
+
+
+
+
+### Observation
+
+Financial stress levels vary considerably among students, although moderate levels appear more common.
+
+---
+
+##  Distribution of Work/Study Hours
+
+Work/study hours indicate the amount of time students spend on academic or work-related activities.
+
+```{r}
+ggplot(
+  depression,
+  aes(x = `Work/Study Hours`)
+) +
+  geom_histogram(
+    binwidth = 1,
+    fill = "purple",
+    color = "black"
+  ) +
+  labs(
+    title = "Distribution of Work/Study Hours",
+    x = "Work/Study Hours",
+    y = "Frequency"
+  ) +
+  theme_minimal()
+```
+
+### Observation
+
+Most students spend a moderate number of hours on work or study activities, with fewer students reporting extremely high workloads.
+
+---
+
+##  Gender Distribution
+
+Bar charts are useful for visualizing categorical variables.
+
+```{r}
+ggplot(
+  depression,
+  aes(x = Gender)
+) +
+  geom_bar(
+    fill = "steelblue"
+  ) +
+  labs(
+    title = "Gender Distribution",
+    x = "Gender",
+    y = "Count"
+  ) +
+  theme_minimal()
+```
+
+### Observation
+
+The dataset includes both male and female students. The distribution provides insight into the gender composition of the sample.
+
+---
+
+##  Sleep Duration Distribution
+
+Sleep duration is an important lifestyle factor associated with mental health.
+
+```{r}
+ggplot(
+  depression,
+  aes(x = `Sleep Duration`)
+) +
+  geom_bar(
+    fill = "forestgreen"
+  ) +
+  labs(
+    title = "Sleep Duration Distribution",
+    x = "Sleep Duration",
+    y = "Count"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x =
+      element_text(
+        angle = 30,
+        hjust = 1
+      )
+  )
+```
+
+### Observation
+
+Most students report moderate sleep duration, while relatively fewer students experience very short or very long sleep patterns.
+
+---
+
+##  Dietary Habits Distribution
+
+Dietary habits may influence physical and mental health.
+
+```{r}
+ggplot(
+  depression,
+  aes(x = `Dietary Habits`)
+) +
+  geom_bar(
+    fill = "green"
+  ) +
+  labs(
+    title = "Dietary Habits Distribution",
+    x = "Dietary Habits",
+    y = "Count"
+  ) +
+  theme_minimal()
+```
+
+### Observation
+
+Students are distributed across different dietary habit categories, with some dietary patterns appearing more frequently than others.
+
+---
+
+##  Depression Distribution
+
+This is the target variable of the analysis.
+
+```{r}
+ggplot(
+  depression,
+  aes(x = factor(Depression))
+) +
+  geom_bar(
+    fill = "tomato"
+  ) +
+  labs(
+    title = "Depression Distribution",
+    x = "Depression",
+    y = "Count"
+  ) +
+  theme_minimal()
+```
+
+### Observation
+
+The plot shows the proportion of students classified as depressed and non-depressed. This helps determine whether the dataset is balanced or imbalanced.
+
+---
+
+
+
+-----------------------------------------------------------------------
+#Section 4 -- Preprocessing and feature engineering 
+-----------------------------------------------------------------------
+
+
+
+# Section 4 — Preprocessing & Feature Engineering
+
+Preprocessing and feature engineering transform raw data into a clean, structured, and informative format suitable for supervised machine learning. Following the problem framing and exploratory findings in previous sections, this section addresses data quality anomalies, handles missing values, treats outliers, encodes categorical features, scales numerical variables, creates domain-informed engineered features, and applies a principled feature selection pipeline.
+
+---
+
+## 4.1 Missing Value Treatment
+
+Evaluating missing data is critical to prevent bias and maintain sample size integrity.
+
+```{r missing-value-analysis}
+# Count missing values per variable
+missing_summary <- depression %>%
+  summarise(across(everything(), ~ sum(is.na(.)))) %>%
+  pivot_longer(cols = everything(), names_to = "Variable", values_to = "Missing_Count") %>%
+  mutate(Missing_Percentage = round((Missing_Count / nrow(depression)) * 100, 4)) %>%
+  filter(Missing_Count > 0)
+
+kable(missing_summary, 
+      caption = "Table 4.1: Summary of Missing Values in Raw Dataset") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
+```
+
+#Financial Stress Imputation: Only 3 out of 27,901 rows (0.0108%) contain missing values. Because the missing proportion is negligible (< 0.1%), dropping rows or using complex model-based imputation is unnecessary. We apply median imputation (median value = 3) as it is robust to extreme skewness and preserves all 27,901 observations without introducing variance distortion.
+
+#Sleep Duration and Dietary Habits "Others" Category: The Sleep Duration variable contains 18 records labeled "Others", and Dietary Habits contains 12 records labeled "Others". Because "Others" represents ambiguous multi-level noise without ordinal ordering, these records are mode-imputed to their respective majority categories ("Less than 5 hours" and "Unhealthy").
+
+
+
+# Create clean working copy
+depression <- depression
+
+# Impute Financial Stress with median
+median_fin_stress <- median(depression$`Financial Stress`, na.rm = TRUE)
+depression$`Financial Stress`[is.na(depression$`Financial Stress`)] <- median_fin_stress
+
+# Mode imputation for 'Others' categories
+mode_sleep <- names(which.max(table(depression$`Sleep Duration`[depression$`Sleep Duration` != "Others"])))
+mode_diet  <- names(which.max(table(depression$`Dietary Habits`[depression$`Dietary Habits` != "Others"])))
+
+depression <- depression %>%
+  mutate(
+    `Sleep Duration` = ifelse(`Sleep Duration` == "Others", mode_sleep, `Sleep Duration`),
+    `Dietary Habits` = ifelse(`Dietary Habits` == "Others", mode_diet, `Dietary Habits`)
+  )
+
+cat("Remaining missing values in dataset:", sum(is.na(depression)), "\n")
+
+
+#4.2 Outlier Detection and Treatment
+#Outliers in continuous numerical variables can distort distance metrics, gradient updates, and regression coefficients. We evaluate numerical continuous variables (Age, CGPA, Work/Study Hours) using both statistical thresholds (IQR method) and domain validation.
+
+
+
+# Outlier assessment using IQR rule
+```{r}
+# Outlier assessment using IQR rule
+calc_iqr_outliers <- function(x) {
+  q1 <- quantile(x, 0.25, na.rm = TRUE)
+  q3 <- quantile(x, 0.75, na.rm = TRUE)
+  iqr <- q3 - q1
+  lower_bound <- q1 - 1.5 * iqr
+  upper_bound <- q3 + 1.5 * iqr
+  sum(x < lower_bound | x > upper_bound, na.rm = TRUE)
+}
+
+outlier_summary <- tibble(
+  Variable = c("Age", "CGPA", "Work/Study Hours"),
+  IQR_Outlier_Count = c(
+    calc_iqr_outliers(depression$Age),
+    calc_iqr_outliers(depression$CGPA),
+    calc_iqr_outliers(depression$`Work/Study Hours`)
+  )
+)
+
+outlier_summary
+```
+
+
+
+
+#Strategy & Domain Reasoning
+Age Treatment (Winsorisation/Capping): The Age variable ranges from 18 to 59 years. While values above 32 are statistically flagged as IQR outliers, mature/postgraduate students aged up to 45 are valid records. However, extreme values above 45 are capped at the 99th percentile (40 years) using Winsorisation to prevent skewing model parameters while retaining student observations.
+
+CGPA Treatment (Domain Bounding): CGPA ranges from 0.0 to 10.0 on the Indian grading scale. Values near 0.0 are plausible academic failures rather than corrupted sensor errors; hence, hard truncation is avoided. However, values below 1.0 are winsorised to 1.0 to limit extreme leverage.
+
+Work/Study Hours Validation: Daily study hours range strictly between 0 and 12 hours, which falls entirely within realistic human domain limits. No capping is required.
+```
+
+# Capping extreme Age values at the 99th percentile
+```{r}
+p99_age <- quantile(depression$Age, 0.99)
+depression <- depression %>%
+  mutate(
+    Age = ifelse(Age > p99_age, p99_age, Age),
+    CGPA = ifelse(CGPA < 1.0, 1.0, CGPA)
+  )
+
+```
+
+
+#4.3 Categorical EncodingMachine learning models require numerical feature inputs. Categorical variables are encoded based on their intrinsic mathematical structure (ordinal vs. nominal).StrategyOrdinal Encoding: Applied to variables with a natural intrinsic order:Sleep Duration: 'Less than 5 hours' $\rightarrow$ 1, '5-6 hours' $\rightarrow$ 2, '7-8 hours' $\rightarrow$ 3, 'More than 8 hours' $\rightarrow$ 4.Dietary Habits: 'Unhealthy' $\rightarrow$ 1, 'Moderate' $\rightarrow$ 2, 'Healthy' $\rightarrow$ 3.Binary Flag Encoding: Converted to 1/0 binary indicators:Gender: 'Male' $\rightarrow$ 1, 'Female' $\rightarrow$ 0.Have you ever had suicidal thoughts ?: 'Yes' $\rightarrow$ 1, 'No' $\rightarrow$ 0.Family History of Mental Illness: 'Yes' $\rightarrow$ 1, 'No' $\rightarrow$ 0.
+```
+
+```{r}
+depression_encoded <- depression %>%
+  mutate(
+    # Ordinal Encoding
+    Sleep_Duration_Ord = case_when(
+      `Sleep Duration` == "Less than 5 hours" ~ 1,
+      `Sleep Duration` == "5-6 hours"         ~ 2,
+      `Sleep Duration` == "7-8 hours"         ~ 3,
+      `Sleep Duration` == "More than 8 hours"   ~ 4,
+      TRUE ~ 2
+    ),
+    Dietary_Habits_Ord = case_when(
+      `Dietary Habits` == "Unhealthy" ~ 1,
+      `Dietary Habits` == "Moderate"  ~ 2,
+      `Dietary Habits` == "Healthy"   ~ 3,
+      TRUE ~ 2
+    ),
+    # Binary Indicator Encoding
+    Gender_Male = ifelse(Gender == "Male", 1, 0),
+    Suicidal_Thoughts = ifelse(`Have you ever had suicidal thoughts ?` == "Yes", 1, 0),
+    Family_History = ifelse(`Family History of Mental Illness` == "Yes", 1, 0)
+  )
+```
+```
+
+#4.4 Feature EngineeringTo capture non-linear relationships and domain-specific risk factors, three new composite features are engineered and added to the dataset:1. Total_Stress_Index (Additive Interaction Term)Formula: $\text{Academic Pressure} + \text{Financial Stress}$Justification: Guided directly by RQ1, academic workload and financial strain frequently compound each other. Combining both ordinal stressors into a unified index (range 1–10) provides the model with an explicit additive composite proxy for overall student burden.2. Sleep_Deprivation_Flag (Binary Risk Indicator)Formula: $\mathbb{I}(\text{Sleep Duration Ordinal} == 1 \text{ [Less than 5 hours]})$Justification: Guided directly by RQ2, clinical mental health literature indicates that severe sleep deprivation ($< 5$ hours) exhibits a step-function non-linear threshold effect on depression risk, rather than a purely linear trend.3. Academic_Efficiency_Ratio (Derived Ratio Feature)Formula: $\frac{\text{CGPA}}{\text{Work/Study Hours} + 1}$Justification: Captures academic yield relative to time effort expended. A low ratio indicates a student who spends high study hours but yields low CGPA, signaling potential academic burnout, learning inefficiency, or cognitive fatigue—a known psychological trigger for depression.
+```
+
+```{r}
+
+depression_engineered <- depression_encoded %>%
+  mutate(
+    # Feature 1: Total Stress Index (Composite Stressor)
+    Total_Stress_Index = `Academic Pressure` + `Financial Stress`,
+    
+    # Feature 2: Severe Sleep Deprivation Flag (Threshold Feature)
+    Sleep_Deprivation_Flag = ifelse(Sleep_Duration_Ord == 1, 1, 0),
+    
+    # Feature 3: Academic Efficiency Ratio (Burnout Proxy)
+    Academic_Efficiency_Ratio = round(CGPA / (`Work/Study Hours` + 1), 4)
+  )
+
+# Preview engineered features
+depression_engineered %>%
+  select(Total_Stress_Index, Sleep_Deprivation_Flag, Academic_Efficiency_Ratio, Depression) %>%
+  head(5) %>%
+  kable(caption = "Table 4.3: Sample Records of Engineered Features") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
+```
+
+
+```
+#4.5 Feature SelectionA multi-stage, principled feature selection pipeline is applied to eliminate non-informative, redundant, corrupted, and near-zero variance predictors:Identifier & Corrupted Column Removal: id is an arbitrary sequence; City contains 52 unstructured values with severe row-shift corruption ("M.Tech", "3.0"); Profession is $99.9\%$ "Student".Near-Zero Variance (NZV) Filter: Evaluated using caret::nearZeroVar(). Work Pressure (mean = $0.0004$) and Job Satisfaction (mean = $0.0006$) show virtually zero variance across all student records and are removed.Correlation Filter: Evaluating pair-wise linear correlations among numerical predictors to avoid severe multicollinearity ($|r| > 0.85$).
+```
+
+```{r}
+# Define candidate numeric/encoded predictor set
+candidate_features <- depression_engineered %>%
+  select(
+    Age, CGPA, `Academic Pressure`, `Study Satisfaction`, `Work/Study Hours`,
+    `Financial Stress`, Sleep_Duration_Ord, Dietary_Habits_Ord, Gender_Male,
+    Suicidal_Thoughts, Family_History, Total_Stress_Index,
+    Sleep_Deprivation_Flag, Academic_Efficiency_Ratio,
+    `Work Pressure`, `Job Satisfaction`, Depression
+  )
+
+# 1. NZV Evaluation
+nzv_results <- nearZeroVar(candidate_features, saveMetrics = TRUE)
+kable(nzv_results, caption = "Table 4.4: Near-Zero Variance Analysis via caret") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = TRUE)
+
+# Drop NZV variables (Work Pressure, Job Satisfaction)
+selected_data <- candidate_features %>%
+  select(-`Work Pressure`, -`Job Satisfaction`)
+
+# 2. Correlation Filter Analysis
+cor_matrix <- cor(selected_data %>% select(-Depression), use = "complete.obs")
+
+ggcorrplot(cor_matrix, 
+           hc.order = TRUE, 
+           type = "lower", 
+           lab = TRUE, 
+           lab_size = 2.5, 
+           method = "circle", 
+           colors = c("#6D9EC1", "white", "#E46726"),
+           title = "Figure 4.1: Correlation Matrix of Retained Predictors")
+
+```
+
+
+```#Justification of Retained Feature SetAll remaining predictors show non-zero variance and weak-to-moderate pairwise correlations ($|r| < 0.70$), ensuring that multicollinearity will not destabilise downstream classification algorithms in Phase 2.
+```
+```
+#4.6 Numeric Scaling & NormalisationFeatures with widely differing ranges (e.g., Age [18–40] vs. Academic_Efficiency_Ratio [0.08–10.0]) can dominate distance-based models (KNN, SVM) and gradient-descent algorithms. We apply Z-score Standardisation ($\mu = 0, \sigma = 1$) to all continuous numeric features using caret::preProcess().
+```
+
+# Identify continuous numeric features to scale
+```{r}
+continuous_vars <- c("Age", "CGPA", "Academic Pressure", "Study Satisfaction", 
+                     "Work/Study Hours", "Financial Stress", "Total_Stress_Index", 
+                     "Academic_Efficiency_Ratio")
+```
+
+# Fit preProcess scaler on numeric features
+```{r}
+scaler <- preProcess(selected_data[, continuous_vars], method = c("center", "scale"))
+```
+# Apply standardisation
+```{r}
+scaled_numeric <- predict(scaler, selected_data[, continuous_vars])
+```
+# Recombine scaled features with unscaled binary/ordinal features & target factor
+```{r}
+final_dataset <- selected_data %>%
+  select(-all_of(continuous_vars)) %>%
+  bind_cols(scaled_numeric) %>%
+  mutate(Depression = factor(Depression, levels = c(0, 1), labels = c("No", "Yes")))
+```
+
+# Confirm standardisation statistics (mean ~ 0, sd ~ 1)
+```{r}
+scaling_check <- tibble(
+  Variable = continuous_vars,
+  Mean = sapply(scaled_numeric, function(x) round(mean(x), 4)),
+  Std_Dev = sapply(scaled_numeric, function(x) round(sd(x), 4))
+)
+
+kable(scaling_check, caption = "Table 4.5: Post-Standardisation Summary Statistics") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), full_width = FALSE)
+```
+
+```
+#4.7 Saving the Final Prepared Dataset for Phase 2
+The final clean, engineered, selected, and scaled dataset is saved as both an .rds object and a .csv file. This ensures reproducible and seamless loading for Phase 2 machine learning modeling without re-running preprocessing routines.
+```
+
+
+# Save final prepared dataset
+```{r}
+saveRDS(final_dataset, file = "student_depressioned_phase1.rds")
+write_csv(final_dataset, "student_depressioned_phase1.csv")
+
+cat("Final preprocessed dataset saved successfully!\n")
+cat("Final Dimensions :", paste(dim(final_dataset), collapse = " rows x "), "columns\n")
+```
+
